@@ -7,18 +7,28 @@ import {
 import { fetchRandomMovie, fetchWatchProviders } from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import { saveMovieRating } from "../utils/firestore";
+import { db } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
+import PreferencesModal from "./PreferencesModal";
 
 const MovieGenerator = forwardRef((props, ref) => {
   const [movie, setMovie] = useState(null);
   const [providers, setProviders] = useState([]);
   const [showProjector, setShowProjector] = useState(true);
   const [ratingStatus, setRatingStatus] = useState("");
+  const [showPreferencesModal, setShowPreferencesModal] = useState(false);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [userPrefs, setUserPrefs] = useState(null);
+
   const { user } = useAuth();
 
   const loadMovie = async () => {
+    if (!userPrefs) return;
+
     setShowProjector(true);
     setMovie(null);
-    const selectedMovie = await fetchRandomMovie();
+
+    const selectedMovie = await fetchRandomMovie(userPrefs); // pass preferences
     const services = await fetchWatchProviders(selectedMovie.id);
     setMovie(selectedMovie);
     setProviders(services);
@@ -31,10 +41,32 @@ const MovieGenerator = forwardRef((props, ref) => {
     },
   }));
 
+  // Load preferences
   useEffect(() => {
-    loadMovie();
-  }, []);
+    const checkPrefs = async () => {
+      if (!user) return;
 
+      const ref = doc(db, "users", user.uid);
+      const snap = await getDoc(ref);
+      const data = snap.data();
+
+      if (!data?.preferences) {
+        setShowPreferencesModal(true);
+      } else {
+        setUserPrefs(data.preferences);
+        setPreferencesLoaded(true);
+      }
+    };
+
+    checkPrefs();
+  }, [user]);
+
+  // Load movie once preferences are ready
+  useEffect(() => {
+    if (preferencesLoaded) loadMovie();
+  }, [preferencesLoaded]);
+
+  // Auto clear rating message
   useEffect(() => {
     if (ratingStatus) {
       const timeout = setTimeout(() => setRatingStatus(""), 3000);
@@ -44,11 +76,18 @@ const MovieGenerator = forwardRef((props, ref) => {
 
   return (
     <>
-      {showProjector && (
+      {showPreferencesModal && (
+        <PreferencesModal onClose={() => {
+          setShowPreferencesModal(false);
+          setPreferencesLoaded(true); // trigger movie load
+        }} />
+      )}
+
+      {showProjector && preferencesLoaded && (
         <div className="absolute top-[22%] left-1/2 transform -translate-x-1/2 z-10 w-[70%] h-[40%] bg-white/10 blur-2xl rounded-xl animate-pulse" />
       )}
 
-      {movie && (
+      {movie && preferencesLoaded && (
         <div className="absolute top-[33%] sm:top-[25.5%] xl:top-[14%] left-1/2 transform -translate-x-1/2 z-20 w-[95%] max-w-7xl px-4 text-white">
           <div className="flex flex-col md:flex-row items-center md:items-start gap-4 md:gap-6 justify-center">
             {/* Movie Poster */}
@@ -66,6 +105,7 @@ const MovieGenerator = forwardRef((props, ref) => {
               <p className="text-sm sm:text-base lg:text-lg drop-shadow-sm leading-relaxed">
                 {movie.overview}
               </p>
+
               <div className="flex flex-wrap justify-center md:justify-start gap-3 mt-4">
                 {providers.map((p) => (
                   <img
@@ -90,6 +130,7 @@ const MovieGenerator = forwardRef((props, ref) => {
                         saveMovieRating(user.uid, movie.id.toString(), {
                           title: movie.title,
                           liked: true,
+                          poster_path: movie.poster_path,
                         });
                         setRatingStatus("👍 Thanks for your feedback!");
                       }}
@@ -101,10 +142,10 @@ const MovieGenerator = forwardRef((props, ref) => {
                     <button
                       onClick={() => {
                         saveMovieRating(user.uid, movie.id.toString(), {
-                            title: movie.title,
-                            liked: true,
-                            poster_path: movie.poster_path,
-                            });
+                          title: movie.title,
+                          liked: false,
+                          poster_path: movie.poster_path,
+                        });
                         setRatingStatus("👎 Thanks for your feedback!");
                       }}
                       className="hover:scale-125 transition-transform text-red-400"

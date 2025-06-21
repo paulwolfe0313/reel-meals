@@ -10,7 +10,7 @@ const Home = () => {
   const { user } = useAuth();
 
   useEffect(() => {
-    const audio = new Audio("/public/assets/public/drivein-ambience.mp3");
+    const audio = new Audio("/assets/public/drivein-ambience.mp3");
     audio.loop = true;
     audio.volume = 0.2;
     audio.play().catch((e) => console.log("Audio autoplay blocked", e));
