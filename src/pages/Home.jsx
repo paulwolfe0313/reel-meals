@@ -19,6 +19,14 @@ const Home = () => {
   const handleRegenerate = () => {
     movieRef.current?.regenerate();
   };
+  useEffect(() => {
+  const handleGenerate = () => {
+    movieRef.current?.regenerate();
+  };
+  window.addEventListener("generate-new-movie", handleGenerate);
+  return () => window.removeEventListener("generate-new-movie", handleGenerate);
+}, []);
+
 
   return (
     <div className="relative min-h-screen font-oldschool bg-black text-white overflow-hidden">

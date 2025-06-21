@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import NavBar from "../components/NavBar";
+import PreferencesModal from "../components/PreferencesModal";
 
 const MyAccount = () => {
   const { user } = useAuth();
@@ -12,6 +13,7 @@ const MyAccount = () => {
   const [address, setAddress] = useState("");
   const [status, setStatus] = useState("");
   const navigate = useNavigate();
+  const [showPrefsEditor, setShowPrefsEditor] = useState(false);
 
   const handlePasswordUpdate = async () => {
     try {
@@ -83,6 +85,19 @@ const MyAccount = () => {
             🎞️ View My Ratings
           </button>
         </div>
+            <div className="mb-6">
+                <h2 className="text-xl font-semibold mb-2">Movie Preferences</h2>
+                <button
+                    onClick={() => setShowPrefsEditor(true)}
+                    className="bg-purple-500 px-4 py-2 rounded hover:bg-purple-600"
+                >
+                    Edit Preferences
+                </button>
+                </div>
+
+                {showPrefsEditor && (
+                <PreferencesModal isEdit={true} onClose={() => setShowPrefsEditor(false)} />
+                )}
 
         {status && <p className="mt-4 text-sm text-green-400">{status}</p>}
       </div>

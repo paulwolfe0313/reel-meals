@@ -19,6 +19,11 @@ const MovieGenerator = forwardRef((props, ref) => {
   const [showPreferencesModal, setShowPreferencesModal] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [userPrefs, setUserPrefs] = useState(null);
+  const [ageGroup, setAgeGroup] = useState(null);
+  const [showAgeWarning, setShowAgeWarning] = useState(false);
+  const [pendingMovie, setPendingMovie] = useState(null);
+  const [error, setError] = useState(null);
+  const [animateKey, setAnimateKey] = useState(0); // force animation re-run
 
   const { user } = useAuth();
 
@@ -27,12 +32,41 @@ const MovieGenerator = forwardRef((props, ref) => {
 
     setShowProjector(true);
     setMovie(null);
+    setError(null);
 
-    const selectedMovie = await fetchRandomMovie(userPrefs); // pass preferences
-    const services = await fetchWatchProviders(selectedMovie.id);
-    setMovie(selectedMovie);
-    setProviders(services);
-    setTimeout(() => setShowProjector(false), 2500);
+    try {
+      const selectedMovie = await fetchRandomMovie(userPrefs);
+      if (!selectedMovie?.title) throw new Error("No movie returned.");
+
+      // Handle age restrictions
+      const isAdult = selectedMovie.adult === true;
+      const isUnrated = selectedMovie.vote_average < 3 && !selectedMovie.vote_count;
+      const titleLC = selectedMovie.title?.toLowerCase() || "";
+      const needsWarning =
+        isAdult || isUnrated || titleLC.includes("sex");
+
+      if (ageGroup === "18+") {
+        if (needsWarning) {
+          setPendingMovie({ movie: selectedMovie, services: [] });
+          setShowAgeWarning(true);
+          return;
+        }
+      } else if (needsWarning) {
+        return loadMovie(); // auto-regenerate
+      }
+
+      setMovie(selectedMovie);
+      const services = !selectedMovie.fallback
+        ? await fetchWatchProviders(selectedMovie.id)
+        : [];
+      setProviders(services);
+      setAnimateKey((prev) => prev + 1);
+    } catch (err) {
+      console.warn("Movie generation failed:", err.message);
+      setError("No suitable movie found. Please adjust your preferences or try wildcard mode.");
+    } finally {
+      setTimeout(() => setShowProjector(false), 1000);
+    }
   };
 
   useImperativeHandle(ref, () => ({
@@ -41,11 +75,9 @@ const MovieGenerator = forwardRef((props, ref) => {
     },
   }));
 
-  // Load preferences
   useEffect(() => {
     const checkPrefs = async () => {
       if (!user) return;
-
       const ref = doc(db, "users", user.uid);
       const snap = await getDoc(ref);
       const data = snap.data();
@@ -56,17 +88,17 @@ const MovieGenerator = forwardRef((props, ref) => {
         setUserPrefs(data.preferences);
         setPreferencesLoaded(true);
       }
+
+      setAgeGroup(data?.ageGroup || "18+");
     };
 
     checkPrefs();
   }, [user]);
 
-  // Load movie once preferences are ready
   useEffect(() => {
     if (preferencesLoaded) loadMovie();
   }, [preferencesLoaded]);
 
-  // Auto clear rating message
   useEffect(() => {
     if (ratingStatus) {
       const timeout = setTimeout(() => setRatingStatus(""), 3000);
@@ -74,30 +106,81 @@ const MovieGenerator = forwardRef((props, ref) => {
     }
   }, [ratingStatus]);
 
+  const handleAgeWarningAccept = () => {
+    setMovie(pendingMovie.movie);
+    setProviders(pendingMovie.services || []);
+    setShowAgeWarning(false);
+    setPendingMovie(null);
+    setTimeout(() => setShowProjector(false), 1000);
+    setAnimateKey((prev) => prev + 1);
+  };
+
   return (
     <>
       {showPreferencesModal && (
-        <PreferencesModal onClose={() => {
-          setShowPreferencesModal(false);
-          setPreferencesLoaded(true); // trigger movie load
-        }} />
+        <PreferencesModal
+          onClose={() => {
+            setShowPreferencesModal(false);
+            setPreferencesLoaded(true);
+          }}
+        />
+      )}
+
+      {showAgeWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center text-center px-4">
+          <div className="bg-white text-black p-6 rounded max-w-md w-full shadow-xl">
+            <h2 className="text-2xl font-bold mb-4 text-red-600">⚠️ Age Restricted Content</h2>
+            <p className="mb-4 text-sm">
+              This movie may be rated R or contain content not suitable for viewers under 18.
+              By continuing, you acknowledge you are 18+.
+            </p>
+            <button
+              onClick={handleAgeWarningAccept}
+              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+            >
+              I'm 18+, Show the Movie
+            </button>
+          </div>
+        </div>
       )}
 
       {showProjector && preferencesLoaded && (
-        <div className="absolute top-[22%] left-1/2 transform -translate-x-1/2 z-10 w-[70%] h-[40%] bg-white/10 blur-2xl rounded-xl animate-pulse" />
+        <div className="absolute top-[22%] left-1/2 transform -translate-x-1/2 z-10 w-[70%] h-[40%] bg-white/10 blur-2xl rounded-xl animate-projector" />
       )}
 
-      {movie && preferencesLoaded && (
-        <div className="absolute top-[33%] sm:top-[25.5%] xl:top-[14%] left-1/2 transform -translate-x-1/2 z-20 w-[95%] max-w-7xl px-4 text-white">
+      {error && (
+        <div className="absolute top-[30%] left-1/2 transform -translate-x-1/2 z-30 w-[90%] max-w-2xl bg-white text-black text-center p-6 rounded shadow-lg">
+          <h2 className="text-xl font-semibold">😢 No Suitable Movie Found</h2>
+          <p className="mt-2 text-sm">{error}</p>
+          <button
+            onClick={() => {
+              setUserPrefs((prev) => ({ ...prev, wildcard: true }));
+              setError(null);
+              loadMovie();
+            }}
+            className="mt-4 bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-4 py-2 rounded"
+          >
+            🎲 Try Wildcard Instead
+          </button>
+        </div>
+      )}
+
+      {movie && !error && preferencesLoaded && !showAgeWarning && (
+        <div
+          key={animateKey}
+          className="absolute top-[33%] sm:top-[25.5%] xl:top-[14%] left-1/2 transform -translate-x-1/2 z-20 w-[95%] max-w-7xl px-4 text-white animate-fadeIn"
+        >
           <div className="flex flex-col md:flex-row items-center md:items-start gap-4 md:gap-6 justify-center">
-            {/* Movie Poster */}
             <img
-              src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
+              src={
+                movie.poster_path?.startsWith("http")
+                  ? movie.poster_path
+                  : `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+              }
               alt={movie.title}
               className="rounded shadow-lg w-44 sm:w-52 lg:w-64 xl:w-72 max-w-[300px]"
             />
 
-            {/* Text + Providers */}
             <div className="text-center md:text-left max-w-md">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 drop-shadow-md">
                 {movie.title}
@@ -118,8 +201,7 @@ const MovieGenerator = forwardRef((props, ref) => {
                 ))}
               </div>
 
-              {/* Thumbs Up/Down */}
-              {user && (
+              {user && !movie.fallback && (
                 <div className="mt-6 text-white text-center md:text-left">
                   <p className="text-sm md:text-base mb-2 font-semibold">
                     Already seen this movie? Did you enjoy it?
